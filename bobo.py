@@ -52,6 +52,7 @@ _default_content_type = 'text/html; charset=UTF-8'
 
 _json_content_type = re.compile('application/json;?').match
 
+# 内省函数参数信息
 getargspec = inspect.getargspec if six.PY2 else inspect.getfullargspec
 
 
@@ -198,7 +199,7 @@ class Application:
         bobo_errors = config.get('bobo_errors')
         if bobo_errors is not None:
             if isinstance(bobo_errors, six.string_types):
-                # 大体同上
+                # 同上
                 bobo_errors = _uncomment(bobo_errors)
                 if ':' in bobo_errors:
                     bobo_errors = _get_global(bobo_errors)
@@ -215,6 +216,7 @@ class Application:
         if isinstance(bobo_resources, six.string_types):
             bobo_resources = _uncomment(bobo_resources, True)
             if bobo_resources:
+                # 根据 resource 字符串，解析对应的 route、resource
                 self.handlers = _route_config(bobo_resources)
             else:
                 raise ValueError("Missing bobo_resources option.")
@@ -241,27 +243,37 @@ class Application:
                     allowed.update(exc.allowed)
                     continue
                 if response is not None:
+                    # 有响应就直接返回，否则可能路由不匹配，继续遍历
                     return response
             if allowed:
+                # 遍历完仍没有返回，并且 allowed 不为空，说明使用了不受支持的
+                # 方法
                 return self.method_not_allowed(request, method, allowed)
             return self.not_found(request, method)
         except BoboException as exc:
+            # 返回了不合法的 response，根据返回值构建合法的 wsgi response 对象
             return self.build_response(request, method, exc)
         except MissingFormVariable as v:
+            # 从各种途径获取不到处理函数想要获取的参数
             return self.missing_form_variable(request, method, v.name)
         except NotFound:
+            # 显示抛出 not found
             return self.not_found(request, method)
         except bbbbad_errors:
+            # 无论如何不应被忽略的致命异常
             raise
         except Exception as exc:
             if (self.reraise_exceptions or
                 request.environ.get("x-wsgiorg.throw_errors")
                 ):
+                # 指定不捕获其余错误，则再次抛出
                 raise
             return self.exception(request, method, sys.exc_info())
 
     def __call__(self, environ, start_response):
-        """Handle a WSGI application request.
+        """
+        使得本实例为合法的 wsgi app
+        Handle a WSGI application request.
         """
         request = webob.Request(environ)
         if request.charset is None:
@@ -305,17 +317,21 @@ class Application:
         response.content_type = content_type
 
         if method == 'HEAD':
+            # 如果请求方法为 HEAD，说明只想要获取 http head，不需要产生 body，直接返回
             return response
 
         body = data.body
+        # 根据返回值的类型设定不同的 response body
         if isinstance(body, six.text_type):
             response.text = body
         elif isinstance(body, six.binary_type):
             response.body = body
         elif _json_content_type(content_type):
+            # 如果请求类型是 json，则序列化 body 为 json
             import json
             response.body = json.dumps(body).encode("utf-8")
         else:
+            # 否则返回值不能转化为一个合法的 wsgi resposne 对象
             raise TypeError('bad response', body, content_type)
 
         return response
@@ -374,6 +390,7 @@ def redirect(url, status=302, body=None,
     # if isinstance(url, six.text_type):
     #     url = url.encode('utf-8')
 
+    # 使用 Location 头进行重定向
     response = webob.Response(status=status, headerlist=[('Location', url)])
     response.content_type = content_type
     response.unicode_body = body
@@ -785,6 +802,7 @@ class _Handler:
         pass
 
     def __call__(self, *args, **kw):
+        # 使得 resource 可以手动提供参数直接调用
         return self.bobo_original(*args, **kw)
 
     def __get__(self, inst, class_):
